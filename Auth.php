@@ -111,7 +111,7 @@ class Auth implements \Piwik\Auth
 
 	protected function getSiteIDs(){
 
-		$site_ids = Access::doAsSuperUser(function () use () {
+		$site_ids = Access::doAsSuperUser(function () {
 				$sitesManagerApi = SitesManagerAPI::getInstance();
 				return $sitesManagerApi->getAllSitesId();
 				});
