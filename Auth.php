@@ -10,8 +10,12 @@ namespace Piwik\Plugins\LoginHttpAuth;
 
 use Piwik\AuthResult;
 use Piwik\DB;
+use Piwik\Access;
+use Piwik\Date;
 use Piwik\Plugins\Login;
 use Piwik\Plugins\UsersManager\Model;
+use Piwik\Plugins\UsersManager\API as UsersManagerAPI;
+use Piwik\Plugins\SitesManager\API as SitesManagerAPI;
 
 class Auth implements \Piwik\Auth
 {
@@ -62,15 +66,58 @@ class Auth implements \Piwik\Auth
             $user = $this->userModel->getUser($httpLogin);
 
             if(empty($user)) {
-                return new AuthResult(AuthResult::FAILURE, $httpLogin, null);
+		$user = $this->createUserFromHttpAuthUser($httpLogin);
             }
 
             $code = !empty($user['superuser_access']) ? AuthResult::SUCCESS_SUPERUSER_AUTH_CODE : AuthResult::SUCCESS;
-            return new AuthResult($code, $httpLogin, $user['token_auth']);
+            return new AuthResult($code, $user['login'], $user['token_auth']);
 
         }
         return $this->fallbackAuth->authenticate();
     }
+
+    protected function createUserFromHttpAuthUser($httpLogin)
+    {	
+
+	    $user = array(
+			    'login' => $httpLogin,
+			    'password' => md5('NO_LOCAL_AUTH'),
+			    'email' => $httpLogin . '@uvm.edu'
+			 );
+
+
+	    $usersManagerApi = UsersManagerAPI::getInstance();
+	    $token_auth = $usersManagerApi->createTokenAuth($user['login']);
+	    $this->userModel->addUser($user['login'], $user['password'], $user['email'], $user['login'], $token_auth, Date::now()->getDatetime());	
+
+	    $new_user = $this->userModel->getUser($httpLogin);
+		
+	    if (!empty($new_user)){
+
+		    // Set new user view access.  By default, we are making it so they can view all sites.
+		    // TODO: add settings/config option for this.
+		    $default_site_ids = $this->getSiteIDs();
+
+		    $default_role = 'view'; 
+		    Access::doAsSuperUser(function () use ($default_site_ids,$default_role, $new_user) {
+				    $usersManagerApi = UsersManagerAPI::getInstance();
+				    $usersManagerApi->setUserAccess($new_user['login'], $default_role, $default_site_ids);
+				    });
+
+		    return $new_user;
+	    }
+		
+    }
+
+	protected function getSiteIDs(){
+
+		$site_ids = Access::doAsSuperUser(function () use () {
+				$sitesManagerApi = SitesManagerAPI::getInstance();
+				return $sitesManagerApi->getAllSitesId();
+				});
+		return $site_ids;
+	}
+
 
     protected function getHttpAuthLogin()
     {
@@ -81,8 +128,8 @@ class Auth implements \Piwik\Auth
            $httpLogin = $_SERVER['HTTP_AUTH_USER'];
         } elseif (isset($_ENV['AUTH_USER'])) {
             $httpLogin = $_ENV['AUTH_USER'];
-        } elseif (isset($_ENV['REMOTE_USER'])) {
-            $httpLogin = $_ENV['REMOTE_USER'];
+        } elseif (isset($_SERVER['REMOTE_USER'])) {
+            $httpLogin = $_SERVER['REMOTE_USER'];
         } elseif (isset($_ENV['REDIRECT_REMOTE_USER'])) {
             $httpLogin = $_ENV['REDIRECT_REMOTE_USER'];
         }
